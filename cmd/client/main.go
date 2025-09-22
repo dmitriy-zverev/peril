@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, _, err = pubsub.DeclareAndBind(
+	ch, _, err := pubsub.DeclareAndBind(
 		conn,
 		routing.ExchangePerilDirect,
 		routing.PauseKey+"."+username,
@@ -44,16 +44,41 @@ func main() {
 	}
 
 	gamestate := gamelogic.NewGameState(username)
+
+	if err := pubsub.SubscribeJSON(
+		conn,
+		string(routing.ExchangePerilDirect),
+		string(routing.PauseKey)+"."+username,
+		string(routing.PauseKey),
+		pubsub.SimpleQueueType{Transient: true},
+		handlerPause(gamestate),
+	); err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+	}
+
+	if err := pubsub.SubscribeJSON(
+		conn,
+		string(routing.ExchangePerilTopic),
+		string(routing.ArmyMovesPrefix)+"."+username,
+		string(routing.ArmyMovesPrefix)+"."+"*",
+		pubsub.SimpleQueueType{Transient: true},
+		handlerMove(gamestate),
+	); err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+	}
+
 	for {
 		input := gamelogic.GetInput()
 		if len(input) < 1 {
 			continue
 		}
 
-		stop, err := parseClientCommand(input, gamestate)
+		stop, err := parseClientCommand(input, gamestate, ch)
 		if err != nil {
 			fmt.Printf("%v\n", err)
-			os.Exit(1)
+
 		}
 		if stop {
 			break
@@ -68,18 +93,30 @@ func main() {
 
 func parseClientCommand(
 	cmds []string,
-	gamestate *gamelogic.GameState,
+	gs *gamelogic.GameState,
+	ch *amqp.Channel,
 ) (bool, error) {
 	switch strings.ToLower(cmds[0]) {
 	case "spawn":
-		if err := gamestate.CommandSpawn(cmds); err != nil {
+		if err := gs.CommandSpawn(cmds); err != nil {
 			return false, err
 		}
 	case "move":
-		move, err := gamestate.CommandMove(cmds)
+		move, err := gs.CommandMove(cmds)
 		if err != nil {
 			return false, err
 		}
+
+		if err := pubsub.PublishJSON(
+			ch,
+			string(routing.ExchangePerilTopic),
+			string(routing.ArmyMovesPrefix)+"."+gs.Player.Username,
+			move,
+		); err != nil {
+			fmt.Printf("%v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("The move was published successfuly")
 
 		movedUnitsRanks := []string{}
 		for _, unit := range move.Units {
@@ -88,12 +125,12 @@ func parseClientCommand(
 
 		fmt.Printf(
 			"%s moved %v to %v\n",
-			gamestate.Player.Username,
+			gs.Player.Username,
 			strings.Join(movedUnitsRanks, ","),
 			move.ToLocation,
 		)
 	case "status":
-		gamestate.CommandStatus()
+		gs.CommandStatus()
 	case "spam":
 		fmt.Println("Spamming not allowed yet!")
 	case "quit":
@@ -104,4 +141,18 @@ func parseClientCommand(
 	}
 
 	return false, nil
+}
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(rs routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(rs)
+	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(mv gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(mv)
+	}
 }
