@@ -55,7 +55,9 @@ func DeclareAndBind(
 			false,
 			false,
 			false,
-			nil,
+			amqp.Table{
+				"x-dead-letter-exchange": "peril_dlx",
+			},
 		)
 		if err != nil {
 			return nil, amqp.Queue{}, err
@@ -68,7 +70,9 @@ func DeclareAndBind(
 			true,
 			true,
 			false,
-			nil,
+			amqp.Table{
+				"x-dead-letter-exchange": "peril_dlx",
+			},
 		)
 		if err != nil {
 			return nil, amqp.Queue{}, err

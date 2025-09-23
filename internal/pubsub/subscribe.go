@@ -8,13 +8,21 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackDiscard
+	NackRequeue
+)
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
 	queueName,
 	key string,
 	queueType SimpleQueueType,
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	ch, queue, err := DeclareAndBind(
 		conn,
@@ -48,8 +56,14 @@ func SubscribeJSON[T any](
 				os.Exit(1)
 			}
 
-			handler(dataStruct)
-			delivery.Ack(false)
+			switch handler(dataStruct) {
+			case Ack:
+				delivery.Ack(false)
+			case NackDiscard:
+				delivery.Nack(false, false)
+			case NackRequeue:
+				delivery.Nack(false, true)
+			}
 		}
 	}()
 

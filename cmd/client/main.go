@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,8 +19,7 @@ func main() {
 	connString := "amqp://guest:guest@localhost:5672/"
 	conn, err := amqp.Dial(connString)
 	if err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("could not dial to rabbitmq: %v", err)
 	}
 	defer conn.Close()
 
@@ -27,20 +27,12 @@ func main() {
 
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("could not create user: %v", err)
 	}
 
-	ch, _, err := pubsub.DeclareAndBind(
-		conn,
-		routing.ExchangePerilDirect,
-		routing.PauseKey+"."+username,
-		routing.PauseKey,
-		pubsub.SimpleQueueType{Transient: true},
-	)
+	publishCh, err := conn.Channel()
 	if err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("could not create channel: %v", err)
 	}
 
 	gamestate := gamelogic.NewGameState(username)
@@ -53,8 +45,7 @@ func main() {
 		pubsub.SimpleQueueType{Transient: true},
 		handlerPause(gamestate),
 	); err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("could not subscribe: %v", err)
 	}
 
 	if err := pubsub.SubscribeJSON(
@@ -63,10 +54,20 @@ func main() {
 		string(routing.ArmyMovesPrefix)+"."+username,
 		string(routing.ArmyMovesPrefix)+"."+"*",
 		pubsub.SimpleQueueType{Transient: true},
-		handlerMove(gamestate),
+		handlerMove(gamestate, publishCh),
 	); err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
+		log.Fatalf("could not subscribe: %v", err)
+	}
+
+	if err := pubsub.SubscribeJSON(
+		conn,
+		string(routing.ExchangePerilTopic),
+		string(routing.WarRecognitionsPrefix),
+		string(routing.WarRecognitionsPrefix)+".#",
+		pubsub.SimpleQueueType{Durable: true},
+		handlerWar(gamestate),
+	); err != nil {
+		log.Fatalf("could not subscribe: %v", err)
 	}
 
 	for {
@@ -75,7 +76,7 @@ func main() {
 			continue
 		}
 
-		stop, err := parseClientCommand(input, gamestate, ch)
+		stop, err := parseClientCommand(input, gamestate, publishCh)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 
@@ -141,18 +142,4 @@ func parseClientCommand(
 	}
 
 	return false, nil
-}
-
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	return func(rs routing.PlayingState) {
-		defer fmt.Print("> ")
-		gs.HandlePause(rs)
-	}
-}
-
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
-	return func(mv gamelogic.ArmyMove) {
-		defer fmt.Print("> ")
-		gs.HandleMove(mv)
-	}
 }
