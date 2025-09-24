@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,7 +136,29 @@ func parseClientCommand(
 	case "status":
 		gs.CommandStatus()
 	case "spam":
-		fmt.Println("Spamming not allowed yet!")
+		if len(cmds) < 2 {
+			return false, errors.New("spam command should have 1 argument")
+		}
+
+		logSpeed, err := strconv.Atoi(cmds[1])
+		if err != nil {
+			return false, err
+		}
+
+		for range logSpeed {
+			if err := pubsub.PublishGob(
+				ch,
+				routing.ExchangePerilTopic,
+				routing.GameLogSlug+"."+gs.Player.Username,
+				routing.GameLog{
+					Username:    gs.Player.Username,
+					CurrentTime: time.Now(),
+					Message:     gamelogic.GetMaliciousLog(),
+				},
+			); err != nil {
+				return false, err
+			}
+		}
 	case "quit":
 		gamelogic.PrintQuit()
 		return true, nil
