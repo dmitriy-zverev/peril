@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/dmitriy-zverev/peril/internal/gamelogic"
 	"github.com/dmitriy-zverev/peril/internal/pubsub"
@@ -42,7 +43,7 @@ func main() {
 		string(routing.ExchangePerilDirect),
 		string(routing.PauseKey)+"."+username,
 		string(routing.PauseKey),
-		pubsub.SimpleQueueType{Transient: true},
+		pubsub.SimpleQueueTransient,
 		handlerPause(gamestate),
 	); err != nil {
 		log.Fatalf("could not subscribe: %v", err)
@@ -53,7 +54,7 @@ func main() {
 		string(routing.ExchangePerilTopic),
 		string(routing.ArmyMovesPrefix)+"."+username,
 		string(routing.ArmyMovesPrefix)+"."+"*",
-		pubsub.SimpleQueueType{Transient: true},
+		pubsub.SimpleQueueTransient,
 		handlerMove(gamestate, publishCh),
 	); err != nil {
 		log.Fatalf("could not subscribe: %v", err)
@@ -64,8 +65,8 @@ func main() {
 		string(routing.ExchangePerilTopic),
 		string(routing.WarRecognitionsPrefix),
 		string(routing.WarRecognitionsPrefix)+".#",
-		pubsub.SimpleQueueType{Durable: true},
-		handlerWar(gamestate),
+		pubsub.SimpleQueueDurable,
+		handlerWar(gamestate, publishCh),
 	); err != nil {
 		log.Fatalf("could not subscribe: %v", err)
 	}
@@ -142,4 +143,17 @@ func parseClientCommand(
 	}
 
 	return false, nil
+}
+
+func publishGameLog(publishCh *amqp.Channel, username, msg string) error {
+	return pubsub.PublishGob(
+		publishCh,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug+"."+username,
+		routing.GameLog{
+			Username:    username,
+			CurrentTime: time.Now(),
+			Message:     msg,
+		},
+	)
 }

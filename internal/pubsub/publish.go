@@ -1,16 +1,13 @@
 package pubsub
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
-
-type SimpleQueueType struct {
-	Durable   bool
-	Transient bool
-}
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	jsonData, err := json.Marshal(val)
@@ -35,6 +32,29 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	return nil
 }
 
+func PublishGob[T any](ch *amqp.Channel, exchange, key string, val T) error {
+	var gobData bytes.Buffer
+	if err := gob.NewEncoder(&gobData).Encode(&val); err != nil {
+		return err
+	}
+
+	if err := ch.PublishWithContext(
+		context.Background(),
+		exchange,
+		key,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/gob",
+			Body:        gobData.Bytes(),
+		},
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func DeclareAndBind(
 	conn *amqp.Connection,
 	exchange,
@@ -48,7 +68,7 @@ func DeclareAndBind(
 	}
 
 	var queue amqp.Queue
-	if queueType.Durable {
+	if queueType == SimpleQueueDurable {
 		queue, err = pubsubChan.QueueDeclare(
 			queueName,
 			true,
@@ -63,7 +83,7 @@ func DeclareAndBind(
 			return nil, amqp.Queue{}, err
 		}
 	}
-	if queueType.Transient {
+	if queueType == SimpleQueueTransient {
 		queue, err = pubsubChan.QueueDeclare(
 			queueName,
 			false,

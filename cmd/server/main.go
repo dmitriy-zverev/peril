@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,7 +27,7 @@ func main() {
 
 	fmt.Printf("Connection to RabbitMQ is successful at %s\n", connString)
 
-	rabbitChan, err := conn.Channel()
+	pubChan, err := conn.Channel()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		os.Exit(1)
@@ -37,11 +38,23 @@ func main() {
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
 		routing.GameLogSlug+"."+"*",
-		pubsub.SimpleQueueType{Durable: true},
+		pubsub.SimpleQueueDurable,
 	)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		os.Exit(1)
+	}
+
+	err = pubsub.SubscribeGob(
+		conn,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.SimpleQueueDurable,
+		handlerLogs(),
+	)
+	if err != nil {
+		log.Fatalf("could not starting consuming logs: %v", err)
 	}
 
 	for {
@@ -50,7 +63,7 @@ func main() {
 			continue
 		}
 
-		if parseServerCommand(input[0], rabbitChan) {
+		if parseServerCommand(input[0], pubChan) {
 			break
 		}
 	}
