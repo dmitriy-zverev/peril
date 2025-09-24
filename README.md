@@ -203,7 +203,7 @@ This project is free to use without any license.
 
 For questions and support:
 - Open an issue on GitHub
-- Check the [Boot.dev Learn Pub/Sub course](https://learn.boot.dev/learn-pub-sub) for foundational concepts
+- Check the [Boot.dev Learn Pub/Sub repo](https://github.com/bootdotdev/learn-pub-sub-starter) for started project
 
 ---
 
